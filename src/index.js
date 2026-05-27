@@ -543,10 +543,15 @@ client.on('message', async (message) => {
     resetInactivityTimer(phoneNumber);
   } catch (error) {
     console.error(`❌ Erro ao processar mensagem de ${contactName}:`, error.message);
-    botCurrentlySending.delete(phoneNumber);
     try {
+      // Mantém no botCurrentlySending para que o message_create da mensagem
+      // de fallback não dispare o auto-pause incorretamente
+      botCurrentlySending.add(phoneNumber);
       await message.reply('Oi! 😊 Tive uma instabilidade aqui. Pode repetir sua mensagem? ✨');
-    } catch (_) { /* ignora */ }
+      setTimeout(() => botCurrentlySending.delete(phoneNumber), 3000);
+    } catch (_) {
+      botCurrentlySending.delete(phoneNumber);
+    }
   } finally {
     processing.delete(phoneNumber);
   }
