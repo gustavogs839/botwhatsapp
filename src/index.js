@@ -38,7 +38,7 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--disable-gpu',
-      '--single-process',           // necessário em ambientes com pouca memória
+      '--no-zygote',                // essencial para containers (Railway/Docker)
       '--disable-extensions',
     ],
   },
