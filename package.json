@@ -1,0 +1,19 @@
+{
+  "name": "maria-gabriella-beauty-bot",
+  "version": "1.0.0",
+  "description": "Bot WhatsApp para Maria Gabriella Beauty Studio",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
+    "dotenv": "^16.4.7",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.1-alpha.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
