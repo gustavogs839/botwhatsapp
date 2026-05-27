@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const fs      = require('fs');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode  = require('qrcode-terminal');
 const server  = require('./server');
@@ -487,6 +488,44 @@ client.on('message', async (message) => {
     processing.delete(phoneNumber);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  RESET DE SESSÃO (via página /reset)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Apaga a sessão do WhatsApp salva e reinicializa o cliente.
+ * Isso fará aparecer um novo QR Code na página /qr.
+ */
+async function resetSession() {
+  console.log('\n🔄 Resetando sessão do WhatsApp...');
+  server.setBotOffline();
+
+  try {
+    await client.destroy();
+  } catch (e) {
+    console.warn('Aviso ao destruir cliente:', e.message);
+  }
+
+  // Apaga a pasta de sessão
+  const authPath = './.wwebjs_auth';
+  try {
+    if (fs.existsSync(authPath)) {
+      fs.rmSync(authPath, { recursive: true, force: true });
+    }
+    fs.mkdirSync(authPath, { recursive: true });
+    console.log('✅ Sessão apagada com sucesso.');
+  } catch (e) {
+    console.error('Erro ao apagar sessão:', e.message);
+  }
+
+  // Reinicializa após 2s para o destroy completar
+  console.log('⏳ Reinicializando cliente em 2s...');
+  setTimeout(() => client.initialize(), 2000);
+}
+
+// Registra o callback de reset no servidor HTTP
+server.setResetCallback(resetSession);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  INICIALIZAÇÃO E SHUTDOWN
