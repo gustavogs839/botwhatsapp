@@ -30,8 +30,8 @@ const client = new Client({
   authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
   puppeteer: {
     headless: true,
-    // Em produção (Docker/Railway) usa o Chromium instalado no sistema
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    // Usa o Chrome baixado pelo próprio Puppeteer (versão garantidamente compatível)
+    // Não forçamos executablePath — Puppeteer encontra automaticamente
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -39,7 +39,7 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--disable-gpu',
-      '--no-zygote',                // essencial para containers (Railway/Docker)
+      '--no-zygote',
       '--disable-extensions',
     ],
   },
