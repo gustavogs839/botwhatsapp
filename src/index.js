@@ -1,9 +1,14 @@
 require('dotenv').config();
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const qrcode  = require('qrcode-terminal');
+const server  = require('./server');
 const { chat, clearHistory, activeConversations } = require('./claude');
-const config = require('./studio-config');
+const config  = require('./studio-config');
+
+// ─── Inicia o servidor HTTP (QR Code + health check) ─────────────────────────
+server.setBotName(config.nome);
+server.start();
 
 // ─── Validação de ambiente ────────────────────────────────────────────────────
 if (!process.env.ANTHROPIC_API_KEY) {
@@ -24,6 +29,8 @@ const client = new Client({
   authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
   puppeteer: {
     headless: true,
+    // Em produção (Docker/Railway) usa o Chromium instalado no sistema
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -31,6 +38,8 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--disable-gpu',
+      '--single-process',           // necessário em ambientes com pouca memória
+      '--disable-extensions',
     ],
   },
 });
@@ -368,9 +377,10 @@ function resetInactivityTimer(phoneNumber) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 client.on('qr', (qr) => {
-  console.log('\n📱 Escaneie o QR Code abaixo com o WhatsApp do estúdio:\n');
-  qrcode.generate(qr, { small: true });
-  console.log('\nAguardando leitura do QR Code...\n');
+  server.setQr(qr); // disponibiliza para a página web
+  console.log('\n📱 QR Code disponível em: http://localhost:' + (process.env.PORT || 3000) + '/qr');
+  console.log('   (ou escaneie diretamente abaixo)\n');
+  qrcode.generate(qr, { small: true }); // também exibe no terminal (útil localmente)
 });
 
 client.on('loading_screen', (percent, message) => {
@@ -387,6 +397,7 @@ client.on('auth_failure', (msg) => {
 });
 
 client.on('ready', () => {
+  server.setBotReady(); // atualiza a página web para "Bot Online"
   console.log(`\n✨ Bot ${config.nome} está online!`);
   console.log(`📊 Conversas ativas no cache: ${activeConversations()}`);
   console.log(`🤖 Modelo IA: ${config.ia.modelo}`);
@@ -401,6 +412,7 @@ client.on('ready', () => {
 });
 
 client.on('disconnected', (reason) => {
+  server.setBotOffline(); // volta para o estado "aguardando"
   console.warn('\n⚠️  Desconectado:', reason);
   console.log('Reconectando em 5 segundos...');
   setTimeout(() => client.initialize(), 5000);
