@@ -62,7 +62,20 @@ const humanControlTimers = new Map();
 /** Marca quais números o bot está enviando agora — evita falso-positivo no auto-pause */
 const botCurrentlySending = new Set();
 
+/** Flag: só processa message_create após o bot estar 100% pronto */
+let clientReady = false;
+
 const HANDOFF_TIMEOUT_MS = (config.handoff.retomarAposMinutos || 60) * 60 * 1000;
+
+/**
+ * Extrai apenas a parte numérica de um ID do WhatsApp.
+ * Necessário para comparar @c.us com @lid — ambos têm o mesmo número base.
+ * Ex: "5562981234567@c.us" → "5562981234567"
+ *     "74174118768756@lid" → "74174118768756"
+ */
+function idUser(phoneId) {
+  return phoneId ? phoneId.split('@')[0] : '';
+}
 
 /**
  * Pausa o bot para um contato e inicia o timer de retomada automática.
@@ -114,25 +127,35 @@ function fmt(phoneNumber) {
 // pelo próprio celular. Quando o bot envia, ele marca o número em
 // botCurrentlySending — assim sabemos que não foi a Gabriella quem digitou.
 //
+// ATENÇÃO: comparamos pela parte numérica do ID (idUser) pois o WhatsApp
+// pode retornar @c.us em mensagens recebidas e @lid em mensagens enviadas
+// para o mesmo contato — causando falso-positivo no auto-pause.
+//
 client.on('message_create', (message) => {
-  if (!message.fromMe) return;                         // só saídas
-  if (!message.to || message.to === message.from) return; // ignora mensagens pra si mesmo
+  // Só processa depois que o bot estiver 100% pronto
+  // (evita auto-pause incorreto durante replay de mensagens ao carregar sessão)
+  if (!clientReady) return;
 
-  const phoneNumber = message.to;
+  if (!message.fromMe) return;
+  if (!message.to || message.to === message.from) return;
 
-  // Se o bot acabou de enviar para esse número, ignora (não é a Gabriella)
-  if (botCurrentlySending.has(phoneNumber)) return;
+  const toUser = idUser(message.to);
 
-  // Se a mensagem foi para a própria dona (comandos), ignora
-  if (OWNER_NUMBER && phoneNumber === OWNER_NUMBER) return;
+  // Ignora se o bot acabou de enviar para esse número
+  // Compara pela parte numérica para não errar por @c.us vs @lid
+  const isBotSending = [...botCurrentlySending].some(p => idUser(p) === toUser);
+  if (isBotSending) return;
+
+  // Ignora mensagens enviadas para a própria dona
+  if (OWNER_NUMBER && idUser(OWNER_NUMBER) === toUser) return;
 
   // Chegou aqui = Gabriella digitou manualmente → pausa o bot
+  const phoneNumber = message.to;
   if (!isBotPaused(phoneNumber)) {
     pauseBot(phoneNumber);
     console.log(`💡 Auto-pause ativado: Gabriella respondeu manualmente para ${fmt(phoneNumber)}`);
   } else {
-    // Já pausado: reinicia o timer (ela continua respondendo)
-    pauseBot(phoneNumber);
+    pauseBot(phoneNumber); // já pausado: reinicia o timer
   }
 });
 
@@ -398,6 +421,7 @@ client.on('auth_failure', (msg) => {
 });
 
 client.on('ready', () => {
+  clientReady = true;   // libera o processamento de message_create
   server.setBotReady(); // atualiza a página web para "Bot Online"
   console.log(`\n✨ Bot ${config.nome} está online!`);
   console.log(`📊 Conversas ativas no cache: ${activeConversations()}`);
@@ -413,7 +437,8 @@ client.on('ready', () => {
 });
 
 client.on('disconnected', (reason) => {
-  server.setBotOffline(); // volta para o estado "aguardando"
+  clientReady = false;
+  server.setBotOffline();
   console.warn('\n⚠️  Desconectado:', reason);
   console.log('Reconectando em 5 segundos...');
   setTimeout(() => client.initialize(), 5000);
@@ -499,6 +524,7 @@ client.on('message', async (message) => {
  */
 async function resetSession() {
   console.log('\n🔄 Resetando sessão do WhatsApp...');
+  clientReady = false;
   server.setBotOffline();
 
   try {
@@ -507,21 +533,28 @@ async function resetSession() {
     console.warn('Aviso ao destruir cliente:', e.message);
   }
 
-  // Apaga a pasta de sessão
+  // Aguarda o Chrome fechar completamente antes de apagar os arquivos
+  await new Promise(r => setTimeout(r, 5000));
+
   const authPath = './.wwebjs_auth';
-  try {
-    if (fs.existsSync(authPath)) {
-      fs.rmSync(authPath, { recursive: true, force: true });
+
+  // Tenta apagar até 3 vezes (EBUSY pode persistir brevemente)
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    try {
+      if (fs.existsSync(authPath)) {
+        fs.rmSync(authPath, { recursive: true, force: true });
+      }
+      fs.mkdirSync(authPath, { recursive: true });
+      console.log('✅ Sessão apagada com sucesso.');
+      break;
+    } catch (e) {
+      console.warn(`⏳ Tentativa ${tentativa}/3 falhou (${e.code}), aguardando...`);
+      await new Promise(r => setTimeout(r, 3000));
     }
-    fs.mkdirSync(authPath, { recursive: true });
-    console.log('✅ Sessão apagada com sucesso.');
-  } catch (e) {
-    console.error('Erro ao apagar sessão:', e.message);
   }
 
-  // Reinicializa após 2s para o destroy completar
-  console.log('⏳ Reinicializando cliente em 2s...');
-  setTimeout(() => client.initialize(), 2000);
+  console.log('⏳ Reinicializando cliente...');
+  setTimeout(() => client.initialize(), 1000);
 }
 
 // Registra o callback de reset no servidor HTTP
