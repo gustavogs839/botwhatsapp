@@ -1,11 +1,49 @@
 require('dotenv').config();
 
 const fs      = require('fs');
+const path    = require('path');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode  = require('qrcode-terminal');
 const server  = require('./server');
 const { chat, clearHistory, activeConversations } = require('./claude');
 const config  = require('./studio-config');
+
+// ─── Remove locks do Chrome antes de iniciar ─────────────────────────────────
+//
+// Quando o Railway reinicia o container, o Chrome do deploy anterior pode ter
+// deixado arquivos SingletonLock no volume. Isso impede o Chrome de iniciar
+// com o erro "profile appears to be in use by another Chromium process".
+// Removemos esses locks na inicialização para garantir um start limpo.
+//
+function removeChromeProfileLocks() {
+  const authPath = './.wwebjs_auth';
+  if (!fs.existsSync(authPath)) return;
+
+  const LOCK_FILES = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket']);
+
+  function scanDir(dir) {
+    try {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scanDir(fullPath);
+        } else if (LOCK_FILES.has(entry.name)) {
+          try {
+            fs.unlinkSync(fullPath);
+            console.log(`🔓 Lock removido: ${fullPath}`);
+          } catch (e) {
+            console.warn(`Aviso ao remover lock ${fullPath}:`, e.message);
+          }
+        }
+      }
+    } catch { /* ignora erros de leitura */ }
+  }
+
+  scanDir(authPath);
+}
+
+// Executa na inicialização
+removeChromeProfileLocks();
 
 // ─── Inicia o servidor HTTP (QR Code + health check) ─────────────────────────
 server.setBotName(config.nome);
@@ -552,6 +590,9 @@ async function resetSession() {
       await new Promise(r => setTimeout(r, 3000));
     }
   }
+
+  // Remove locks antes de reinicializar
+  removeChromeProfileLocks();
 
   console.log('⏳ Reinicializando cliente...');
   setTimeout(() => client.initialize(), 1000);
